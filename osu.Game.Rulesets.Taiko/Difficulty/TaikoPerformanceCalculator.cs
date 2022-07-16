@@ -37,11 +37,11 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
 
             double multiplier = 1.1; // This is being adjusted to keep the final pp value scaled around what it used to be when changing things
 
-            if (score.Mods.Any(m => m is ModNoFail))
-                multiplier *= 0.90;
-
             if (score.Mods.Any(m => m is ModHidden))
                 multiplier *= 1.10;
+
+            if (score.Mods.Any(m => m is ModEasy)) // Very slight Easy nerf to further nerf outside of GreatHitWindow.
+                multiplier *= 0.975;
 
             double difficultyValue = computeDifficultyValue(score, taikoAttributes);
             double accuracyValue = computeAccuracyValue(score, taikoAttributes);
@@ -61,12 +61,12 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
 
         private double computeDifficultyValue(ScoreInfo score, TaikoDifficultyAttributes attributes)
         {
-            double difficultyValue = Math.Pow(5 * Math.Max(1.0, attributes.StarRating / 0.175) - 4.0, 2.25) / 450.0;
+            double difficultyValue = Math.Pow(5 * Math.Max(1.0, attributes.StarRating / 0.1755) - 4.0, 2.25) / 450.0;
 
             double lengthBonus = 1 + 0.1 * Math.Min(1.0, totalHits / 1500.0);
             difficultyValue *= lengthBonus;
 
-            difficultyValue *= Math.Pow(0.985, countMiss);
+            difficultyValue *= Math.Pow(0.987, countMiss);
 
             if (score.Mods.Any(m => m is ModHidden))
                 difficultyValue *= 1.025;
@@ -82,10 +82,16 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
             if (attributes.GreatHitWindow <= 0)
                 return 0;
 
-            double accValue = Math.Pow(150.0 / attributes.GreatHitWindow, 1.1) * Math.Pow(score.Accuracy, 15) * 22.0;
+            double accuracyValue = Math.Pow(150.0 / attributes.GreatHitWindow, 1.1) * Math.Pow(score.Accuracy, 15) * 25.0;
 
-            // Bonus for many objects - it's harder to keep good accuracy up for longer
-            return accValue * Math.Min(1.15, Math.Pow(totalHits / 1500.0, 0.3));
+            double lengthBonus = Math.Min(1.15, Math.Pow(totalHits / 1500.0, 0.3));
+            accuracyValue *= lengthBonus;
+
+            // Slight HDFL Bonus for accuracy.
+            if (score.Mods.Any(m => m is ModFlashlight<TaikoHitObject>) && score.Mods.Any(m => m is ModHidden))
+                accuracyValue *= 1.10 * lengthBonus;
+
+            return accuracyValue;
         }
 
         private int totalHits => countGreat + countOk + countMeh + countMiss;
