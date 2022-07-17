@@ -35,7 +35,7 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
             countMeh = score.Statistics.GetValueOrDefault(HitResult.Meh);
             countMiss = score.Statistics.GetValueOrDefault(HitResult.Miss);
 
-            double multiplier = 1.1; // This is being adjusted to keep the final pp value scaled around what it used to be when changing things
+            double multiplier = 1.12; // This is being adjusted to keep the final pp value scaled around what it used to be when changing things
 
             if (score.Mods.Any(m => m is ModHidden))
                 multiplier *= 1.075;
