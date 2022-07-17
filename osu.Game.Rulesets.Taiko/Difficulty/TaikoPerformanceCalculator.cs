@@ -38,9 +38,9 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
             double multiplier = 1.1; // This is being adjusted to keep the final pp value scaled around what it used to be when changing things
 
             if (score.Mods.Any(m => m is ModHidden))
-                multiplier *= 1.10;
+                multiplier *= 1.075;
 
-            if (score.Mods.Any(m => m is ModEasy)) // Very slight Easy nerf to further nerf outside of GreatHitWindow.
+            if (score.Mods.Any(m => m is ModEasy))
                 multiplier *= 0.975;
 
             double difficultyValue = computeDifficultyValue(score, taikoAttributes);
@@ -82,7 +82,7 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
             if (attributes.GreatHitWindow <= 0)
                 return 0;
 
-            double accuracyValue = Math.Pow(135.0 / attributes.GreatHitWindow, 1.1) * Math.Pow(score.Accuracy, 12.5) * 26.0;
+            double accuracyValue = Math.Pow(140.0 / attributes.GreatHitWindow, 1.1) * Math.Pow(score.Accuracy, 12.0) * 27;
 
             double lengthBonus = Math.Min(1.15, Math.Pow(totalHits / 1500.0, 0.3));
             accuracyValue *= lengthBonus;
