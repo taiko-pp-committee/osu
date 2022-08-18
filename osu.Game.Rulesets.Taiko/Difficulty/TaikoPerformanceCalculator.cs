@@ -96,12 +96,12 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
 
             double accuracyValue = Math.Pow(60.0 / attributes.GreatHitWindow, 1.1) * Math.Pow(score.Accuracy, 8.0) * Math.Pow(attributes.StarRating, 0.4) * 27.0;
 
-            double lengthBonus = Math.Min(1.15, Math.Pow(totalHits / 1500.0, 0.3));
+            double lengthBonus = Math.Min(1.15, Math.Pow(totalHits / 1500.0, 0.3)));
             accuracyValue *= lengthBonus;
 
-            // Slight HDFL Bonus for accuracy.
+            // Slight HDFL Bonus for accuracy. A clamp is used to prevent against negative values
             if (score.Mods.Any(m => m is ModFlashlight<TaikoHitObject>) && score.Mods.Any(m => m is ModHidden))
-                accuracyValue *= 1.10 * lengthBonus;
+                accuracyValue *= Math.Min(1.10, 1.10 * lengthBonus);
 
             return accuracyValue;
         }
