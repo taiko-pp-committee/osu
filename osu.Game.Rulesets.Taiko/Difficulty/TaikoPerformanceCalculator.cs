@@ -11,6 +11,10 @@ using osu.Game.Rulesets.Mods;
 using osu.Game.Rulesets.Scoring;
 using osu.Game.Rulesets.Taiko.Objects;
 using osu.Game.Scoring;
+using MathNet.Numerics;
+using MathNet.Numerics.RootFinding;
+using osu.Framework.Audio.Track;
+using osu.Framework.Extensions.IEnumerableExtensions;
 
 namespace osu.Game.Rulesets.Taiko.Difficulty
 {
@@ -20,7 +24,7 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
         private int countOk;
         private int countMeh;
         private int countMiss;
-        private double accuracy;
+        private double? estimatedDeviation;
 
         private double effectiveMissCount;
 
@@ -37,7 +41,7 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
             countOk = score.Statistics.GetValueOrDefault(HitResult.Ok);
             countMeh = score.Statistics.GetValueOrDefault(HitResult.Meh);
             countMiss = score.Statistics.GetValueOrDefault(HitResult.Miss);
-            accuracy = customAccuracy;
+            estimatedDeviation = computeEstimatedDeviation(score, taikoAttributes);
 
             // The effectiveMissCount is calculated by gaining a ratio for totalSuccessfulHits and increasing the miss penalty for shorter object counts lower than 1000.
             if (totalSuccessfulHits > 0)
@@ -67,6 +71,7 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
                 Difficulty = difficultyValue,
                 Accuracy = accuracyValue,
                 EffectiveMissCount = effectiveMissCount,
+                EstimatedUr = estimatedDeviation * 10,
                 Total = totalValue
             };
         }
@@ -87,35 +92,95 @@ namespace osu.Game.Rulesets.Taiko.Difficulty
                 difficultyValue *= 1.025;
 
             if (score.Mods.Any(m => m is ModHardRock))
-                difficultyValue *= 1.050;
+                difficultyValue *= 1.10;
 
             if (score.Mods.Any(m => m is ModFlashlight<TaikoHitObject>))
                 difficultyValue *= 1.050 * lengthBonus;
 
-            return difficultyValue * Math.Pow(accuracy, 2.0);
+            if (estimatedDeviation == null)
+                return 0;
+
+            return difficultyValue * Math.Pow(SpecialFunctions.Erf(40 / (Math.Sqrt(2) * estimatedDeviation.Value)), 2.0);
         }
 
         private double computeAccuracyValue(ScoreInfo score, TaikoDifficultyAttributes attributes, bool isConvert)
         {
-            if (attributes.GreatHitWindow <= 0)
+            if (attributes.GreatHitWindow <= 0 || estimatedDeviation == null)
                 return 0;
 
-            double accuracyValue = Math.Pow(60.0 / attributes.GreatHitWindow, 1.1) * Math.Pow(accuracy, 8.0) * Math.Pow(attributes.StarRating, 0.4) * 27.0;
+            double accuracyValue = Math.Pow(7.5 / estimatedDeviation.Value, 1.1) * Math.Pow(attributes.StarRating / 2.7, 0.8) * 100.0;
 
             double lengthBonus = Math.Min(1.15, Math.Pow(totalHits / 1500.0, 0.3));
-            accuracyValue *= lengthBonus;
 
             // Slight HDFL Bonus for accuracy. A clamp is used to prevent against negative values.
             if (score.Mods.Any(m => m is ModFlashlight<TaikoHitObject>) && score.Mods.Any(m => m is ModHidden) && !isConvert)
-                accuracyValue *= Math.Max(1.0, 1.1 * lengthBonus);
+                accuracyValue *= Math.Max(1.0, 1.05 * lengthBonus);
 
             return accuracyValue;
+        }
+
+        /// <summary>
+        /// Estimates the player's tap deviation based on the OD, number of objects, and number of 300s, 100s, and misses,
+        /// assuming the player's mean hit error is 0. The estimation is consistent in that two SS scores on the same map with the same settings
+        /// will always return the same deviation. See: https://www.desmos.com/calculator/qlr946netu
+        /// </summary>
+        private double? computeEstimatedDeviation(ScoreInfo score, TaikoDifficultyAttributes attributes)
+        {
+            if (totalSuccessfulHits == 0 || attributes.GreatHitWindow == 0)
+                return null;
+
+            // Create a new track to properly calculate the hit window of 100s.
+            var track = new TrackVirtual(10000);
+            score.Mods.OfType<IApplicableToTrack>().ForEach(m => m.ApplyToTrack(track));
+            double clockRate = track.Rate;
+
+            double overallDifficulty = (50 - attributes.GreatHitWindow * clockRate) / 3;
+            double goodHitWindow;
+            if (overallDifficulty <= 5)
+                goodHitWindow = (120 - 8 * overallDifficulty) / clockRate;
+            else
+                goodHitWindow = (80 - 6 * (overallDifficulty - 5)) / clockRate;
+
+            double root2 = Math.Sqrt(2);
+
+            // Log of the most likely deviation resulting in the score's hit judgements, differentiated such that 1 over the most likely deviation returns 0.
+            double logLikelihoodGradient(double d)
+            {
+                if (d <= 0)
+                    return 1;
+
+                double p300 = SpecialFunctions.Erf(attributes.GreatHitWindow / root2 * d);
+                double lnP300 = lnErfcApprox(attributes.GreatHitWindow / root2 * d);
+                double lnP100 = lnErfcApprox(goodHitWindow / root2 * d);
+
+                double t1 = countGreat * (Math.Exp(Math.Log(attributes.GreatHitWindow) + -Math.Pow(attributes.GreatHitWindow / root2 * d, 2)) / p300);
+
+                double t2A = Math.Exp(Math.Log(goodHitWindow) + -Math.Pow(goodHitWindow / root2 * d, 2) - logDiff(lnP300, lnP100));
+                double t2B = Math.Exp(Math.Log(attributes.GreatHitWindow) + -Math.Pow(attributes.GreatHitWindow / root2 * d, 2) - logDiff(lnP300, lnP100));
+                double t2 = (countOk + 1) * (t2A - t2B);
+
+                double t3 = countMiss * Math.Exp(Math.Log(goodHitWindow) + -Math.Pow(goodHitWindow / root2 * d, 2) - lnP100);
+
+                return t1 + t2 - t3;
+            }
+
+            double root = Brent.FindRootExpand(logLikelihoodGradient, 0.02, 0.3);
+
+            return 1 / root;
         }
 
         private int totalHits => countGreat + countOk + countMeh + countMiss;
 
         private int totalSuccessfulHits => countGreat + countOk + countMeh;
 
-        private double customAccuracy => totalHits > 0 ? (countGreat * 300 + countOk * 150) / (totalHits * 300.0) : 0;
+        private double lnErfcApprox(double x)
+        {
+            if (x <= 5)
+                return Math.Log(SpecialFunctions.Erfc(x));
+
+            return -Math.Pow(x, 2) - Math.Log(x) - Math.Log(Math.Sqrt(Math.PI));
+        }
+
+        private double logDiff(double l1, double l2) => l1 + SpecialFunctions.Log1p(-Math.Exp(-(l1 - l2)));
     }
 }
